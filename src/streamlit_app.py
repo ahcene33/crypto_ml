@@ -7,10 +7,42 @@ from datetime import datetime, date
 
 # ----------------------------------------------------------------------
 # Imports absolus du package « src »
-# (le répertoire racine du projet est automatiquement dans le PYTHONPATH
-#  quand on lance :  `streamlit run src/streamlit_app.py`)
 # ----------------------------------------------------------------------
 from src.portfolio import predict_all, run_simulation, get_live_prices
+
+# ----------------------------------------------------------------------
+# Fonctions utilitaires -------------------------------------------------
+# ----------------------------------------------------------------------
+@st.cache_data(show_spinner=False)
+def compute_signals(dates):
+    """
+    Calcule les prédictions (incluant le champ `signal`) pour chaque date fournie.
+
+    Parameters
+    ----------
+    dates : iterable of datetime‑like
+        Dates pour lesquelles on veut les signaux.
+
+    Returns
+    -------
+    pd.DataFrame
+        Colonnes : date, symbol, signal, probability, score, category, price
+    """
+    frames = []
+    for d in dates:
+        # predict_all accepte un pd.Timestamp (ou datetime)
+        pred = predict_all(pd.Timestamp(d))
+        # On ne récupère que les colonnes utiles – on accepte que certaines soient absentes
+        wanted = ["symbol", "signal", "probability", "score", "category", "price"]
+        cols = [c for c in wanted if c in pred.columns]
+        pred = pred[cols]
+        pred["date"] = pd.Timestamp(d)          # garde le dtype datetime64[ns]
+        frames.append(pred)
+
+    if frames:
+        return pd.concat(frames, ignore_index=True)
+    # Retourne un DataFrame vide avec les bonnes colonnes si aucun résultat
+    return pd.DataFrame(columns=["date", "symbol", "signal", "probability", "score", "category", "price"])
 
 # ----------------------------------------------------------------------
 # Configuration globale de la page
@@ -23,7 +55,7 @@ st.set_page_config(
 )
 
 # ----------------------------------------------------------------------
-# ── Sidebar – paramètres de simulation ───────────────────────────────────
+# Sidebar – paramètres de simulation
 # ----------------------------------------------------------------------
 st.sidebar.header("⚙️ Paramètres de la simulation")
 with st.sidebar.form(key="sim_form"):
@@ -42,13 +74,13 @@ with st.sidebar.form(key="sim_form"):
     submitted = st.form_submit_button("▶️ Lancer la simulation")
 
 # ----------------------------------------------------------------------
-# Gestion du cache des résultats de simulation (évite de tout recalculer
-# à chaque rafraîchissement du tableau Live Prices)
+# Gestion du cache des résultats de simulation
 # ----------------------------------------------------------------------
 if "simulation_result" not in st.session_state:
     st.session_state["simulation_result"] = None
 
 if submitted:
+    # On relance la simulation → on invalide le cache des signaux (nouvel horizon)
     with st.spinner("🔧 Simulation en cours…"):
         sim = run_simulation(
             start_date=start_date,
@@ -57,20 +89,35 @@ if submitted:
             monthly_deposit=monthly,
         )
         st.session_state["simulation_result"] = sim
+        # Invalider le cache des signaux car les dates ont changé
+        if "signals_df" in st.session_state:
+            del st.session_state["signals_df"]
 else:
     sim = st.session_state["simulation_result"]
 
 # ----------------------------------------------------------------------
-# ── Mise en page principale – onglets
+# Si la simulation est prête, on calcule (une fois) les signaux pour
+# l’ensemble des dates de la simulation
+# ----------------------------------------------------------------------
+if sim is not None and "signals_df" not in st.session_state:
+    # Récupération des dates uniques de l'historique du portefeuille
+    hist_dates = sim["portfolio_history"]["date"].unique()
+    # Convertir chaque valeur en `datetime.date` afin d’éviter les problèmes de type
+    hist_dates = [pd.Timestamp(d).date() for d in hist_dates]
+    st.session_state["signals_df"] = compute_signals(hist_dates)
+
+# ----------------------------------------------------------------------
+# Mise en page principale – onglets
 # ----------------------------------------------------------------------
 st.title("🚀 Crypto‑ML Portfolio Dashboard")
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "📈 Valeur du portefeuille",
         "🔎 Analyse crypto",
-        "💼 Portefeuille (prédictions)",
+        "💼 Portefeuille (predictions)",
         "💡 Description de la stratégie",
         "💹 Live Prices (Binance)",
+        "🔔 Signaux (temps)",
     ]
 )
 
@@ -311,6 +358,111 @@ with tab5:
         st.plotly_chart(fig_live, use_container_width=True)
 
 # ----------------------------------------------------------------------
+# 6️⃣ Signaux dynamiques dans le temps
+# ----------------------------------------------------------------------
+with tab6:
+    if sim is None:
+        st.info("⚡️ Lancez la simulation pour visualiser les signaux dans le temps.")
+    else:
+        signals_df = st.session_state.get("signals_df")
+        if signals_df is None or signals_df.empty:
+            st.warning("Aucun signal n’a pu être calculé.")
+        else:
+            # ------------------------------------------------
+            # Préparation des données agrégées (nb BUY / SELL par jour)
+            # ------------------------------------------------
+            signals_df["date"] = pd.to_datetime(signals_df["date"])
+            counts = (
+                signals_df.groupby(["date", "signal"])
+                .size()
+                .reset_index(name="count")
+                .pivot(index="date", columns="signal", values="count")
+                .fillna(0)
+                .astype(int)
+            )
+            # S’assurer que les deux colonnes existent (0=SELL, 1=BUY)
+            for col in [0, 1]:
+                if col not in counts.columns:
+                    counts[col] = 0
+            counts = counts[[0, 1]]
+            counts.columns = ["SELL", "BUY"]
+
+            # ------------------------------------------------
+            # Graphique : évolution du nombre de signaux BUY / SELL
+            # ------------------------------------------------
+            fig_sign = go.Figure()
+            fig_sign.add_trace(
+                go.Scatter(
+                    x=counts.index,
+                    y=counts["BUY"],
+                    name="BUY",
+                    mode="lines",
+                    line=dict(color="#00cc96"),
+                )
+            )
+            fig_sign.add_trace(
+                go.Scatter(
+                    x=counts.index,
+                    y=counts["SELL"],
+                    name="SELL",
+                    mode="lines",
+                    line=dict(color="#ff4444"),
+                )
+            )
+            # Repères aux dates de ré‑équilibrage (10 du mois)
+            rebalance_dates = [d for d in counts.index if d.day == 10]
+            for rd in rebalance_dates:
+                fig_sign.add_vline(
+                    x=rd,
+                    line_width=1,
+                    line_dash="dot",
+                    line_color="gray",
+                )
+            fig_sign.update_layout(
+                title="Nombre de signaux BUY / SELL par jour",
+                xaxis_title="Date",
+                yaxis_title="Nb. cryptos",
+                plot_bgcolor="#111111",
+                paper_bgcolor="#111111",
+                font_color="#eeeeee",
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_sign, use_container_width=True)
+
+            # ------------------------------------------------
+            # Sélecteur de date → tableau détaillé
+            # ------------------------------------------------
+            min_dt = signals_df["date"].dt.date.min()
+            max_dt = signals_df["date"].dt.date.max()
+            selected_date = st.date_input(
+                "Date à explorer",
+                value=min_dt,
+                min_value=min_dt,
+                max_value=max_dt,
+            )
+            day_df = signals_df[signals_df["date"].dt.date == selected_date]
+
+            # Métriques du jour sélectionné
+            nb_buy = (day_df["signal"] == 1).sum()
+            nb_sell = (day_df["signal"] == 0).sum()
+            c1, c2 = st.columns(2)
+            c1.metric("Signals BUY", nb_buy)
+            c2.metric("Signals SELL", nb_sell)
+
+            # Détail complet du jour
+            with st.expander(f"Détails des signaux le {selected_date}"):
+                if day_df.empty:
+                    st.info("Aucun signal enregistré pour cette date.")
+                else:
+                    # On garde les colonnes les plus utiles
+                    st.dataframe(
+                        day_df[
+                            ["symbol", "signal", "probability", "score", "category", "price"]
+                        ].reset_index(drop=True),
+                        use_container_width=True,
+                    )
+
+# ----------------------------------------------------------------------
 # Footer – mentions légales
 # ----------------------------------------------------------------------
 st.caption(
@@ -319,7 +471,7 @@ st.caption(
     (pas besoin de clé API). Aucun appel ne conserve d’état ; chaque rafraîchissement
     interroge l’API.  
 
-    📈 Cette application est destinée à un usage de **démo / recherche** et ne
+    📈 Cette application est destinée à un usage de **demo / recherche** et ne
     constitue en aucun cas un conseil d’investissement.  
     """
 )

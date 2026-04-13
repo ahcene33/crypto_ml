@@ -153,4 +153,4 @@ Ce README comprend :
 7. Les informations de contribution
 8. Un avertissement sur les risques
 
-Le lien Streamlit Cloud est indiqué comme étant à remplacer par l'URL réelle une fois le déploiement effectué.
+*© 2024 Ahcene KAHLA – All Rights Reserved*
