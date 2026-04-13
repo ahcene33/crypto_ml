@@ -14,7 +14,7 @@ from datetime import datetime
 # Imports du projet – collecte optionnelle
 # ----------------------------------------------------------------------
 try:
-    from .collect import collect_top_n  # noqa: F401
+    from collect import collect_top_n  # noqa: F401
 except ImportError as e:  # le module n’est pas installé → on continue
     collect_top_n = None
     logging.getLogger(__name__).warning(

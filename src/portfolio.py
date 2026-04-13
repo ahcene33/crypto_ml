@@ -20,7 +20,7 @@ from portfolio_manager import Portfolio
 from config import cfg
 
 # Nouveau helper d’appel à Binance (prices live)
-from .binance_price import fetch_latest_prices
+from binance_price import fetch_latest_prices
 
 log = logging.getLogger(__name__)
 
