@@ -32,3 +32,6 @@ __pycache__/
 # dossiers contenant les fichiers parquet générés automatiquement
 data/raw/
 data/processed/*.parquet         
+
+
+!src/__init__.py
