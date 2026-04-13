@@ -4,11 +4,12 @@
 pandas==2.2.*            # wheel disponible pour py3.14
 numpy==1.26.*            # idem
 scikit-learn==1.5.*      # compatible
-lightgbm==4.5.*         # fonctionne avec py3.14 (wheel)
+lightgbm==4.5.*          # wheel pour py3.14
 optuna==3.6.*            # wheel
 scipy==1.13.*            # wheel
-pyarrow==16.1.*          # version avec wheel pour py3.14
-# (si tu n’utilises pas pyarrow, commente ou supprime la ligne)
+
+# pyarrow==16.1.*        # <-- décommente si tu en as besoin et qu’un wheel pour py3.14 existe
+# (sinon supprime ou laisse commenté)
 
 # -------------------------------------------------
 # Persistence / IO
@@ -20,7 +21,7 @@ PyYAML==6.0.1            # pure‑python
 # Streamlit UI
 # -------------------------------------------------
 streamlit==1.35.*        # dernière version stable
-plotly==5.22.*          # wheel
+plotly==5.22.*           # wheel
 
 # -------------------------------------------------
 # Data collection (optional)
@@ -35,7 +36,7 @@ requests>=2.32.0        # HTTP client
 loguru==0.7.*            # logging
 
 # -------------------------------------------------
-# Build‑time helpers (needed for some wheels)
+# Build‑time helpers (required for some wheels)
 # -------------------------------------------------
 setuptools>=68.0.0       # fournit pkg_resources
-wheel                    # crée les wheels
+wheel                    # permet la construction des wheels
