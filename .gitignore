@@ -1,0 +1,34 @@
+# --------------------------------------------------------------
+# ️ ⚙️  crypto_ml – .gitignore
+# --------------------------------------------------------------
+
+# ------------------------------
+# Environnements virtuels (Python)
+# ------------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+
+# ------------------------------
+# Caches Python
+# ------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ------------------------------
+# Fichiers de configuration personnels
+# ------------------------------
+*.env
+*.local
+*.ini
+*.cfg
+
+# ------------------------------
+# Données lourdes – on ne versionne pas les données brutes ni les artefacts
+# ------------------------------
+# dossiers contenant les fichiers parquet générés automatiquement
+data/raw/
+data/processed/*.parquet         
