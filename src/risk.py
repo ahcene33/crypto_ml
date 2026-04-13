@@ -4,7 +4,7 @@
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
-from .config import cfg
+from config import cfg
 
 def compute_returns(df: pd.DataFrame, price_col: str = "price") -> pd.DataFrame:
     """ajoute les colonnes `ret` (simple) et `logret` (log‑return)."""

@@ -22,15 +22,15 @@ except ImportError as e:  # le module n’est pas installé → on continue
         f"Erreur d’import : {e}"
     )
 
-from .features import add_basic_features, select_features
-from .target import add_targets
-from .risk import (
+from features import add_basic_features, select_features
+from target import add_targets
+from risk import (
     compute_returns,
     volatility_estimate,
     var_parametric,
     expected_shortfall,
 )
-from .train import train_best_model
+from train import train_best_model
 
 # ----------------------------------------------------------------------
 # Back‑test – optionnel (vectorbt / numba).  
@@ -38,7 +38,7 @@ from .train import train_best_model
 # très simple qui ne casse pas le pipeline.
 # ----------------------------------------------------------------------
 try:
-    from .backtest import run_backtest          # type: ignore
+    from backtest import run_backtest          # type: ignore
 except Exception as _bt_err:                     # pragma: no‑cover
     log = logging.getLogger(__name__)
     log.warning(

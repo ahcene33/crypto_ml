@@ -4,7 +4,7 @@
 import numpy as np
 import pandas as pd
 import vectorbt as vbt
-from .config import cfg   # uniquement pour le logger éventuel (pas utilisé ici)
+from config import cfg   # uniquement pour le logger éventuel (pas utilisé ici)
 
 
 def simulate_portfolio(days: int = 365):

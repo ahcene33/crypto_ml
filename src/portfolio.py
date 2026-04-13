@@ -14,10 +14,10 @@ from typing import Dict
 import joblib
 import pandas as pd
 
-from .features import add_basic_features, select_features
-from .prediction_utils import probability_to_category
-from .portfolio_manager import Portfolio
-from .config import cfg
+from features import add_basic_features, select_features
+from prediction_utils import probability_to_category
+from portfolio_manager import Portfolio
+from config import cfg
 
 # Nouveau helper d’appel à Binance (prices live)
 from .binance_price import fetch_latest_prices

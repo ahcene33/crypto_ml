@@ -9,7 +9,7 @@ import pandas as pd
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from pycoingecko import CoinGeckoAPI
-from .config import cfg
+from config import cfg
 
 # dossiers ------------------------------------------------------------
 RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw"

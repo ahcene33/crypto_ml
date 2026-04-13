@@ -2,7 +2,7 @@
 # création de la cible à partir des prix
 
 import pandas as pd
-from .config import cfg
+from config import cfg
 
 def add_targets(df: pd.DataFrame) -> pd.DataFrame:
     """
