@@ -1,24 +1,41 @@
+# -------------------------------------------------
 # Core scientific stack
-pandas==2.2.*
-numpy==1.26.*
-scikit-learn==1.5.*
-lightgbm==4.5.*
-optuna==3.6.*
-scipy==1.13.*
+# -------------------------------------------------
+pandas==2.2.*            # wheel disponible pour py3.14
+numpy==1.26.*            # idem
+scikit-learn==1.5.*      # compatible
+lightgbm==4.5.*         # fonctionne avec py3.14 (wheel)
+optuna==3.6.*            # wheel
+scipy==1.13.*            # wheel
+pyarrow==16.1.*          # version avec wheel pour py3.14
+# (si tu n’utilises pas pyarrow, commente ou supprime la ligne)
 
+# -------------------------------------------------
 # Persistence / IO
-pyarrow==16.0.*
-joblib==1.4.*
-PyYAML==6.0.1
+# -------------------------------------------------
+joblib==1.4.*            # pure‑python
+PyYAML==6.0.1            # pure‑python
 
+# -------------------------------------------------
 # Streamlit UI
-streamlit==1.35.*
-plotly==5.22.*
+# -------------------------------------------------
+streamlit==1.35.*        # dernière version stable
+plotly==5.22.*          # wheel
 
+# -------------------------------------------------
 # Data collection (optional)
-python-binance==1.0.*
-pycoingecko==3.1.*
-requests>=2.32.0
+# -------------------------------------------------
+python-binance==1.0.*    # API public Binance
+pycoingecko==3.1.*      # API CoinGecko
+requests>=2.32.0        # HTTP client
 
+# -------------------------------------------------
 # Misc
-loguru==0.7.*
+# -------------------------------------------------
+loguru==0.7.*            # logging
+
+# -------------------------------------------------
+# Build‑time helpers (needed for some wheels)
+# -------------------------------------------------
+setuptools>=68.0.0       # fournit pkg_resources
+wheel                    # crée les wheels
