@@ -8,7 +8,7 @@ from datetime import datetime, date
 # ----------------------------------------------------------------------
 # Imports absolus du package « src »
 # ----------------------------------------------------------------------
-from src.portfolio import predict_all, run_simulation, get_live_prices
+from .portfolio import predict_all, run_simulation, get_live_prices
 
 # ----------------------------------------------------------------------
 # Fonctions utilitaires -------------------------------------------------
