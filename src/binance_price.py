@@ -4,7 +4,7 @@ Utility to fetch the latest USDT‑denominated prices from Binance.
 
 - Uses the public endpoint https://api.binance.com/api/v3/ticker/price
   which returns *all* ticker pairs in a single request.
-- Includes retry logic with exponential back‑off.
+- Includes retry logic with exponential back‑off and basic rate‑limit handling.
 - Returns a dict `{symbol.upper(): price}` for the symbols supplied by the caller.
 - If the request ultimately fails, a deterministic fallback (price = 0.0) is
   returned so the Streamlit “Live Prices” tab can still display a table.
@@ -12,6 +12,8 @@ Utility to fetch the latest USDT‑denominated prices from Binance.
 
 import logging
 import time
+import random
+import functools
 from typing import List, Dict
 
 import requests
@@ -27,6 +29,7 @@ _MAX_RETRIES = 3                # how many times we repeat the whole request
 _BASE_SLEEP = 0.2               # seconds – multiplied by attempt number
 
 
+@functools.lru_cache(maxsize=1)
 def _fetch_all_tickers() -> List[Dict[str, str]]:
     """
     Retrieve the complete list of ticker objects from Binance.
@@ -35,15 +38,33 @@ def _fetch_all_tickers() -> List[Dict[str, str]]:
     """
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            response = requests.get(_BINANCE_TICKER_URL, timeout=5)
+            # Binance does not require an API key for this public endpoint,
+            # but adding a User‑Agent improves reliability.
+            headers = {
+                "User-Agent": "crypto‑ml/1.0 (https://github.com/your-repo)"
+            }
+            response = requests.get(_BINANCE_TICKER_URL, timeout=5, headers=headers)
             response.raise_for_status()
-            return response.json()          # list of dicts {"symbol": "...", "price": "..."}
-        except Exception as exc:               # pragma: no‑cover
+            return response.json()  # list of dicts {"symbol": "...", "price": "..."}
+        except requests.exceptions.HTTPError as http_err:
+            # 429 = Too Many Requests → respect Retry‑After if present
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else _BASE_SLEEP * attempt
+                log.warning(f"Rate limit hit, sleeping {delay:.2f}s")
+                time.sleep(delay + random.uniform(0, 0.1))
+            else:
+                log.warning(
+                    f"[Binance ticker] HTTP error (attempt {attempt}/{_MAX_RETRIES}) – {http_err}"
+                )
+                if attempt < _MAX_RETRIES:
+                    time.sleep(_BASE_SLEEP * attempt + random.uniform(0, 0.1))
+        except Exception as exc:
             log.warning(
                 f"[Binance ticker] attempt {attempt}/{_MAX_RETRIES} – {exc}"
             )
             if attempt < _MAX_RETRIES:
-                time.sleep(_BASE_SLEEP * attempt)
+                time.sleep(_BASE_SLEEP * attempt + random.uniform(0, 0.1))
 
     # All retries exhausted – log once more and give up
     log.error("Unable to fetch Binance ticker list after multiple attempts.")
@@ -82,7 +103,6 @@ def fetch_latest_prices(symbols: List[str]) -> Dict[str, float]:
     price_lookup: Dict[str, float] = {}
     for entry in all_tickers:
         sym = entry.get("symbol", "")
-        # Only keep the USDT pairs that Binance provides (e.g. BTCUSDT)
         if sym.endswith("USDT"):
             base = sym[:-4]                     # strip the trailing "USDT"
             try:

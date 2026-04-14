@@ -7,11 +7,17 @@ from plotly.subplots import make_subplots
 from datetime import datetime, date
 from pathlib import Path
 import pickle
+import logging
 
 # ----------------------------------------------------------------------
 # Imports absolus du package « src »
 # ----------------------------------------------------------------------
 from portfolio import predict_all, run_simulation, get_live_prices
+
+# ----------------------------------------------------------------------
+# Logging (utile pour le débogage du calcul de variation)
+# ----------------------------------------------------------------------
+log = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
 # Fonctions utilitaires -------------------------------------------------
@@ -31,13 +37,22 @@ def compute_signals(dates):
     if frames:
         return pd.concat(frames, ignore_index=True)
     return pd.DataFrame(
-        columns=["date", "symbol", "signal", "probability", "score", "category", "price"]
+        columns=[
+            "date",
+            "symbol",
+            "signal",
+            "probability",
+            "score",
+            "category",
+            "price",
+        ]
     )
 
 # ----------------------------------------------------------------------
 # Chemin de persistance de la simulation
 # ----------------------------------------------------------------------
 SIM_PATH = Path(__file__).resolve().parents[1] / "simulation.pkl"
+
 
 def _save_simulation(sim):
     """Sauvegarde la simulation au format pickle (robuste, simple)."""
@@ -47,6 +62,7 @@ def _save_simulation(sim):
     except Exception as exc:
         st.error(f"Erreur lors de la sauvegarde de la simulation : {exc}")
 
+
 def _load_simulation():
     """Charge la simulation depuis le disque, ou renvoie None."""
     try:
@@ -54,6 +70,7 @@ def _load_simulation():
             return pickle.load(f)
     except Exception:
         return None
+
 
 # ----------------------------------------------------------------------
 # Configuration globale de la page
@@ -100,7 +117,7 @@ if reset_sim:
         SIM_PATH.unlink()
     st.experimental_rerun()
 
-# Si l'utilisateur lance une simulation → on la calcule et on sauvegarde
+# Lancement ou chargement de la simulation
 if submitted:
     with st.spinner("🔧 Simulation en cours…"):
         sim = run_simulation(
@@ -109,13 +126,31 @@ if submitted:
             initial_capital=capital,
             monthly_deposit=monthly,
         )
+        # ---- GÉNÉRATION DES SIGNALS (temps) -------------------------
+        if sim and "portfolio_history" in sim:
+            dates = (
+                pd.to_datetime(sim["portfolio_history"]["date"])
+                .dt.date
+                .unique()
+                .tolist()
+            )
+            st.session_state["signals_df"] = compute_signals(dates)
+        # ---- STOCKAGE ------------------------------------------------
         st.session_state["simulation_result"] = sim
-        _save_simulation(sim)          # <-- persistance
+        _save_simulation(sim)
 else:
-    # Pas de nouvelle soumission → on tente de charger la précédente
     if st.session_state["simulation_result"] is None:
         st.session_state["simulation_result"] = _load_simulation()
     sim = st.session_state["simulation_result"]
+    # Si la simulation a été chargée depuis le disque, (re)générer les signaux
+    if sim and "portfolio_history" in sim and "signals_df" not in st.session_state:
+        dates = (
+            pd.to_datetime(sim["portfolio_history"]["date"])
+            .dt.date
+            .unique()
+            .tolist()
+        )
+        st.session_state["signals_df"] = compute_signals(dates)
 
 # ----------------------------------------------------------------------
 # Onglets
@@ -279,9 +314,8 @@ with tab3:
 
             with st.expander("🗂️ Détail des actifs BUY"):
                 st.dataframe(
-                    df_buy[
-                        ["symbol", "price", "probability", "score", "category"]
-                    ].reset_index(drop=True),
+                    df_buy[["symbol", "price", "probability", "score", "category"]]
+                    .reset_index(drop=True),
                     use_container_width=True,
                 )
 
@@ -300,7 +334,7 @@ with tab4:
           2. **Le 10 du mois** :
              - on vend toutes les positions dont le **signal = SELL**.  
              - on achète les **2 cryptos** avec le **plus haut score** dont le **signal = BUY**, à parts égales.  
-        - **KPI affichés** : ROI, Sharpe, Max‑drawdown, Volatilité, VaR 95 % et ES 95 %.  
+        - **KPI affichés** : ROI, Sharpe, Max‑draw‑down, Volatilité, VaR 95 % et ES 95 %.  
 
         Les indicateurs VaR/ES sont calculés **historique‑daily** à partir des
         rendements du portefeuille (méthode non‑paramétrique – percentile 5 %).  
@@ -325,24 +359,63 @@ with tab5:
             "Internet ou l’accessibilité du service Binance."
         )
     else:
-        st.dataframe(df_live, use_container_width=True)
+        # --- Calcul de la variation (%) depuis le jour précédent (bonus) ---
+        try:
+            raw_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
+            variation_map = {}
+            for sym in df_live["symbol"]:
+                try:
+                    df_sym = pd.read_parquet(raw_dir / f"{sym}.parquet")
+                    if len(df_sym) >= 2:
+                        last_price = float(df_sym["price"].iloc[-1])
+                        prev_price = float(df_sym["price"].iloc[-2])
+                        variation = (
+                            (last_price - prev_price) / prev_price * 100
+                            if prev_price != 0
+                            else 0.0
+                        )
+                        variation_map[sym] = variation
+                    else:
+                        variation_map[sym] = 0.0
+                except Exception:
+                    variation_map[sym] = None
+            df_live["variation_%"] = df_live["symbol"].map(variation_map)
+        except Exception as exc:
+            log.debug(f"Impossible de calculer les variations : {exc}")
 
-        fig_live = px.bar(
-            df_live.sort_values("price", ascending=False),
-            x="symbol",
-            y="price",
-            title="Prix USDT actuels (départ de 0 USDT)",
-            labels={"price": "Prix (USDT)", "symbol": "Crypto"},
-            color="price",
-            color_continuous_scale=px.colors.sequential.Viridis,
-        )
-        fig_live.update_layout(
-            plot_bgcolor="#111111",
-            paper_bgcolor="#111111",
-            font_color="#eeeeee",
-            xaxis_tickangle=-45,
-        )
-        st.plotly_chart(fig_live, use_container_width=True)
+        # --- Séparation Low‑price / High‑price (axe 1 & axe 2) ---
+        low_df = df_live[df_live["price"] < 1]
+        high_df = df_live[df_live["price"] >= 1]
+
+        with st.expander("🚀 Low‑price cryptos (< 1 USDT)"):
+            if low_df.empty:
+                st.info("Aucune crypto avec prix < 1 USDT.")
+            else:
+                st.dataframe(low_df, use_container_width=True)
+                fig_low = px.bar(
+                    low_df.sort_values("price"),
+                    x="symbol",
+                    y="price",
+                    title="Low‑price cryptos",
+                    color="price",
+                    color_continuous_scale=px.colors.sequential.Viridis,
+                )
+                st.plotly_chart(fig_low, use_container_width=True)
+
+        with st.expander("💰 High‑price cryptos (≥ 1 USDT)"):
+            if high_df.empty:
+                st.info("Aucune crypto avec prix ≥ 1 USDT.")
+            else:
+                st.dataframe(high_df, use_container_width=True)
+                fig_high = px.bar(
+                    high_df.sort_values("price", ascending=False),
+                    x="symbol",
+                    y="price",
+                    title="High‑price cryptos",
+                    color="price",
+                    color_continuous_scale=px.colors.sequential.Viridis,
+                )
+                st.plotly_chart(fig_high, use_container_width=True)
 
 # ----------------------------------------------------------------------
 # 6️⃣ Signaux (temps) – nombre BUY / SELL par jour
@@ -448,11 +521,13 @@ with tab7:
     # 2️⃣  Crypto la moins chère (exclure BTC)
     latest_prices = {}
     for sym in all_symbols:
-        df_tmp = pd.read_parquet(raw_dir / f"{sym}.parquet")
-        latest_prices[sym] = float(df_tmp["price"].iloc[-1])
-
+        try:
+            df_tmp = pd.read_parquet(raw_dir / f"{sym}.parquet")
+            latest_prices[sym] = float(df_tmp["price"].iloc[-1])
+        except Exception:
+            latest_prices[sym] = float("nan")
     cheap_sym = min(
-        (s for s in all_symbols if s != "BTC"),
+        (s for s in all_symbols if s != "BTC" and not pd.isna(latest_prices[s])),
         key=lambda s: latest_prices[s],
         default=None,
     )
