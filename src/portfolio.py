@@ -13,6 +13,7 @@ from typing import Dict
 
 import joblib
 import pandas as pd
+import numpy as np                     # <-- NEW (fallback model)
 
 from features import add_basic_features, select_features
 from prediction_utils import probability_to_category
@@ -21,14 +22,6 @@ from config import cfg
 
 # Nouveau helper d’appel à Binance (prices live)
 from binance_price import fetch_latest_prices
-
-def get_live_prices() -> pd.DataFrame:
-    raw_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
-    symbols = [fp.stem.upper() for fp in raw_dir.glob("*.parquet")]
-    price_dict = fetch_latest_prices(symbols)
-
-    df = pd.DataFrame(list(price_dict.items()), columns=["symbol", "price"])
-    return df.sort_values("symbol").reset_index(drop=True)
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +32,14 @@ _MODEL, _FEATURES = None, None
 
 
 def _load_artifacts():
-    """Lecture unique du modèle + de la liste de features."""
+    """
+    Lecture unique du modèle + de la liste de features.
+
+    - Si les fichiers existent, on les charge normalement.
+    - Sinon on crée un **modèle factice** qui renvoie 0 probabilité pour
+      chaque crypto et une liste de features vide.  Ainsi l’application
+      ne plante plus (tout le tableau des signaux sera à 0 → aucun BUY).
+    """
     global _MODEL, _FEATURES
     if _MODEL is not None and _FEATURES is not None:
         return _MODEL, _FEATURES
@@ -48,14 +48,31 @@ def _load_artifacts():
     model_path = root / "models" / "model.pkl"
     feats_path = root / "data" / "processed" / "features.parquet"
 
-    if not model_path.is_file():
-        raise FileNotFoundError(f"Model not found → {model_path}")
-    if not feats_path.is_file():
-        raise FileNotFoundError(f"Features not found → {feats_path}")
+    # ------------------------------------------------------------
+    # Cas normal – les artefacts existent
+    # ------------------------------------------------------------
+    if model_path.is_file() and feats_path.is_file():
+        _MODEL = joblib.load(str(model_path))
+        _FEATURES = list(pd.read_parquet(feats_path, columns=None).columns)
+        log.info("Modèle & features chargés (cache global)")
+        return _MODEL, _FEATURES
 
-    _MODEL = joblib.load(model_path)
-    _FEATURES = list(pd.read_parquet(feats_path, columns=None).columns)
-    log.info("Modèle & features chargés (cache global)")
+    # ------------------------------------------------------------
+    # Fallback – modèle ou features manquants
+    # ------------------------------------------------------------
+    log.warning(
+        "Model or features not found – using dummy model & empty feature list."
+    )
+
+    class DummyModel:
+        """Modèle minimal qui renvoie 0 probabilité pour chaque ligne."""
+        def predict(self, X):
+            # X peut être ndarray ou DataFrame – on ne garde que le nombre de lignes
+            n = X.shape[0] if hasattr(X, "shape") else len(X)
+            return np.zeros(n)
+
+    _MODEL = DummyModel()
+    _FEATURES = []          # aucune colonne à extraire
     return _MODEL, _FEATURES
 
 
@@ -100,7 +117,7 @@ def predict_all(date_ref: pd.Timestamp) -> pd.DataFrame:
         .infer_objects(copy=False)      # <-- important
         .values
     )
-    prob = model.predict(X)                # LightGBM renvoie déjà des probas
+    prob = model.predict(X)                # LightGBM (ou Dummy) renvoie déjà des probas
     pred["probability"] = prob
     threshold = cfg.get("training", {}).get("threshold", 0.5)
     pred["signal"] = (prob > threshold).astype(int)
@@ -127,8 +144,7 @@ def get_live_prices() -> pd.DataFrame:
     price_dict = fetch_latest_prices(symbols)
 
     df = pd.DataFrame(list(price_dict.items()), columns=["symbol", "price"])
-    df = df.sort_values("symbol").reset_index(drop=True)
-    return df
+    return df.sort_values("symbol").reset_index(drop=True)
 
 
 def run_simulation(
