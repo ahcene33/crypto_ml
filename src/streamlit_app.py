@@ -406,15 +406,11 @@ with tab6:
 with tab7:
     st.subheader("🔎 BTC ↔ Crypto à petit prix (axe secondaire)")
 
-    # ------------------------------------------------------------------
-    # 1️⃣  Récupérer la liste des symboles disponibles
-    # ------------------------------------------------------------------
+    # 1️⃣  Liste des symboles disponibles
     raw_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
     all_symbols = sorted([p.stem.upper() for p in raw_dir.glob("*.parquet")])
 
-    # ------------------------------------------------------------------
-    # 2️⃣  Trouver la crypto la moins chère (exclure BTC)
-    # ------------------------------------------------------------------
+    # 2️⃣  Crypto la moins chère (exclure BTC)
     latest_prices = {}
     for sym in all_symbols:
         df_tmp = pd.read_parquet(raw_dir / f"{sym}.parquet")
@@ -426,31 +422,32 @@ with tab7:
         default=None,
     )
 
-    # ------------------------------------------------------------------
     # 3️⃣  Sélecteur (l’utilisateur peut choisir une autre crypto)
-    # ------------------------------------------------------------------
     chosen_sym = st.selectbox(
         "Crypto faible prix (défaut = la plus basse)",
         options=all_symbols,
         index=all_symbols.index(cheap_sym) if cheap_sym else 0,
     )
 
-    # ------------------------------------------------------------------
-    # 4️⃣  Charger les deux séries temporelles
-    # ------------------------------------------------------------------
-    df_btc = pd.read_parquet(raw_dir / "BTC.parquet")
-    df_alt = pd.read_parquet(raw_dir / f"{chosen_sym}.parquet")
+    # 4️⃣  Charger les deux séries temporelles – **reset index → column «date»**
+    df_btc = pd.read_parquet(raw_dir / "BTC.parquet").reset_index()
+    df_alt = pd.read_parquet(raw_dir / f"{chosen_sym}.parquet").reset_index()
 
-    # Align dates (intersection)
+    # le premier champ après le reset est la date ; on le renomme explicitement
+    if df_btc.columns[0] != "date":
+        df_btc.rename(columns={df_btc.columns[0]: "date"}, inplace=True)
+    if df_alt.columns[0] != "date":
+        df_alt.rename(columns={df_alt.columns[0]: "date"}, inplace=True)
+
+    # 5️⃣  Alignement des dates (intersection)
     common_dates = df_btc["date"].isin(df_alt["date"])
     df_btc = df_btc[common_dates].reset_index(drop=True)
     df_alt = df_alt[df_alt["date"].isin(df_btc["date"])].reset_index(drop=True)
 
-    # ------------------------------------------------------------------
-    # 5️⃣  Dual‑axis plot (left = crypto low‑price, right = BTC)
-    # ------------------------------------------------------------------
+    # 6️⃣  Dual‑axis plot (left = crypto low‑price, right = BTC)
     fig_cmp = make_subplots(specs=[[{"secondary_y": True}]])
-    # Left axis – crypto low‑price (primary)
+
+    # gauche – crypto low‑price (primary axis)
     fig_cmp.add_trace(
         go.Scatter(
             x=df_alt["date"],
@@ -460,7 +457,8 @@ with tab7:
         ),
         secondary_y=False,
     )
-    # Right axis – BTC (secondary)
+
+    # droite – BTC (secondary axis)
     fig_cmp.add_trace(
         go.Scatter(
             x=df_btc["date"],
@@ -470,6 +468,7 @@ with tab7:
         ),
         secondary_y=True,
     )
+
     fig_cmp.update_layout(
         title=f"BTC vs {chosen_sym} (échelle adaptée)",
         hovermode="x unified",
@@ -482,9 +481,7 @@ with tab7:
 
     st.plotly_chart(fig_cmp, use_container_width=True)
 
-    # ------------------------------------------------------------------
-    # 6️⃣  Derniers prix (mise en évidence)
-    # ------------------------------------------------------------------
+    # 7️⃣  Derniers prix (mise en évidence)
     col_l, col_r = st.columns(2)
     col_l.metric(f"Dernier prix {chosen_sym}", f"{df_alt['price'].iloc[-1]:,.4f} USDT")
     col_r.metric("Dernier prix BTC", f"{df_btc['price'].iloc[-1]:,.2f} USDT")
