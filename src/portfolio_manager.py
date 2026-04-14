@@ -7,6 +7,7 @@ Implements:
 - daily price updates
 - rebalance on a specific day of month
 - KPI calculations (ROI, Sharpe, max‑drawdown, VaR 95, ES 95)
+- transaction log (date, symbol, type, price, quantity, cash_change)
 """
 
 from __future__ import annotations
@@ -60,11 +61,13 @@ class Portfolio:
     Gestionnaire de portefeuille minimaliste.
     - cash  : USDT disponible
     - positions : dict(symbol → Position)
-    - history   : list[dict] → “date”, “total_value”, “cash”, “positions_value”,
-                  “unrealized_pnl”, “unrealized_pct”, “positions_count”.
-    - monthly_amount : montant ajouté le jour d’investissement (10 → 50 USDT)
-    - investment_day : jour du mois où le dépôt / le rebalance a lieu (default 10)
-    - start_date : date de la première observation (exemple : 22/01/2026)
+    - history : list[dict] → “date”, “total_value”, “cash”, “positions_value”,
+                 “unrealized_pnl”, “unrealized_pct”, “positions_count”.
+    - transactions : list[dict] → “date”, “symbol”, “type”, “price”, “quantity”,
+                 “cash_change”.
+    - monthly_amount : montant ajouté le jour d’investissement (default 10 → 50 USDT)
+    - investment_day : jour du mois où le dépôt / le rebalance a lieu
+    - start_date    : date de la première observation (exemple : 22/01/2026)
     """
 
     def __init__(
@@ -83,6 +86,7 @@ class Portfolio:
 
         self.positions: Dict[str, Position] = {}
         self.history: List[dict] = []
+        self.transactions: List[dict] = []          # ← journal des trades
 
         # tracking du cash injecté (utile pour le ROI)
         self.total_capital_added = self.cash
@@ -120,7 +124,31 @@ class Portfolio:
         self._snapshot(cur_date)
 
     # ------------------------------------------------------------------
-    # 3️⃣  Logique de trade (BUY / SELL) – date explicite
+    # 3️⃣  Journal des transactions
+    # ------------------------------------------------------------------
+    def _record_transaction(
+        self,
+        cur_date: datetime,
+        symbol: str,
+        type_: str,
+        price: float,
+        quantity: float,
+        cash_change: float,
+    ) -> None:
+        """Enregistre une ligne de transaction dans ``self.transactions``."""
+        self.transactions.append(
+            {
+                "date": cur_date.date(),
+                "symbol": symbol,
+                "type": type_,               # "BUY" ou "SELL"
+                "price": price,
+                "quantity": quantity,
+                "cash_change": cash_change,   # valeur nette ajoutée (+) ou retirée (‑)
+            }
+        )
+
+    # ------------------------------------------------------------------
+    # 4️⃣  Logique de trade (BUY / SELL) – date explicite
     # ------------------------------------------------------------------
     def _execute_buy(
         self,
@@ -157,6 +185,14 @@ class Portfolio:
                 last_price=price,
             )
         self.cash -= cash_to_spend
+        self._record_transaction(
+            cur_date,
+            symbol,
+            "BUY",
+            price,
+            qty,
+            -cash_to_spend,
+        )
         log.debug(
             f"{cur_date.date()} – BUY {qty:.6f} {symbol} @ {price:.4f} "
             f"(cash‑used {cash_to_spend:.2f})"
@@ -178,6 +214,14 @@ class Portfolio:
         fee = proceeds * fee_pct
         net = proceeds - fee
         self.cash += net
+        self._record_transaction(
+            cur_date,
+            symbol,
+            "SELL",
+            price,
+            pos.quantity,
+            net,
+        )
         log.debug(
             f"{cur_date.date()} – SELL {pos.quantity:.6f} {symbol} @ {price:.4f} "
             f"(cash +{net:.2f})"
@@ -185,7 +229,7 @@ class Portfolio:
         del self.positions[symbol]
 
     # ------------------------------------------------------------------
-    # 4️⃣  Rebalancing – exécuté uniquement le jour d’investissement
+    # 5️⃣  Rebalancing – exécuté uniquement le jour d’investissement
     # ------------------------------------------------------------------
     def rebalance(
         self,
@@ -220,7 +264,7 @@ class Portfolio:
         top = buy_candidates.nlargest(top_n, "score")
         cash_available = self.cash
         if cash_available <= 0:
-            log.info(f"{cur_date.date()} – pas de cash disponible pour rebalance")
+            log.info(f"{cur_date.date()} – Pas de cash disponible pour rebalance")
             self._snapshot(cur_date)
             return
 
@@ -234,7 +278,7 @@ class Portfolio:
         self._snapshot(cur_date)
 
     # ------------------------------------------------------------------
-    # 5️⃣  Snapshot – on enregistre la date du jour simulé
+    # 6️⃣  Snapshot – on enregistre la date du jour simulé
     # ------------------------------------------------------------------
     def _snapshot(self, cur_date: datetime) -> None:
         total_positions = sum(p.market_value for p in self.positions.values())
@@ -258,7 +302,7 @@ class Portfolio:
         )
 
     # ------------------------------------------------------------------
-    # 6️⃣  Métriques (ROI, Sharpe, Max‑drawdown, VaR 95, ES 95)
+    # 7️⃣  Métriques (ROI, Sharpe, Max‑drawdown, VaR 95, ES 95)
     # ------------------------------------------------------------------
     def metrics(self, risk_free_rate: float = 0.0) -> dict:
         """Retourne un dictionnaire de métriques basées sur l’historique."""
@@ -311,7 +355,7 @@ class Portfolio:
         }
 
     # ------------------------------------------------------------------
-    # 7️⃣  Export / import JSON (facultatif)
+    # 8️⃣  Export / import JSON (facultatif)
     # ------------------------------------------------------------------
     def to_json(self, path: str | Path) -> None:
         """Sauvegarde de l’état du portefeuille au format JSON."""
@@ -329,6 +373,7 @@ class Portfolio:
                 for sym, pos in self.positions.items()
             },
             "history": self.history,
+            "transactions": self.transactions,
             "total_capital_added": self.total_capital_added,
         }
         Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -353,4 +398,5 @@ class Portfolio:
                 last_price=pos["last_price"],
             )
         port.history = d["history"]
+        port.transactions = d.get("transactions", [])
         return port

@@ -3,7 +3,6 @@
 High‑level façade utilisée par l’application Streamlit.
 - charge le modèle / les noms de features **une fois** (cache module‑level)
 - fournit `predict_all(date)` et `run_simulation(...)`
-- fonction `get_live_prices()` qui interroge Binance en temps réel.
 """
 
 import logging
@@ -19,9 +18,6 @@ from features import add_basic_features, select_features
 from prediction_utils import probability_to_category
 from portfolio_manager import Portfolio
 from config import cfg
-
-# Helper Binance (prix live)
-from binance_price import fetch_latest_prices
 
 log = logging.getLogger(__name__)
 
@@ -132,19 +128,6 @@ def predict_all(date_ref: pd.Timestamp) -> pd.DataFrame:
     return pred[["symbol", "price", "probability", "signal", "score", "category"]]
 
 
-def get_live_prices() -> pd.DataFrame:
-    """
-    Retourne les cotations “live” pour toutes les cryptos présentes
-    dans data/raw/*.parquet via Binance (endpoint public).
-    """
-    raw_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
-    symbols = [fp.stem.upper() for fp in raw_dir.glob("*.parquet")]
-    price_dict = fetch_latest_prices(symbols)
-
-    df = pd.DataFrame(list(price_dict.items()), columns=["symbol", "price"])
-    return df.sort_values("symbol").reset_index(drop=True)
-
-
 def run_simulation(
     start_date: date = date(2026, 1, 22),
     end_date: date | None = None,
@@ -201,9 +184,11 @@ def run_simulation(
     # 4️⃣  Résultats
     history = pd.DataFrame(portfolio.history)
     metrics = portfolio.metrics()
+    transactions = pd.DataFrame(portfolio.transactions)
 
     return {
         "portfolio_history": history,
         "metrics": metrics,
         "last_predictions": df_pred if "df_pred" in locals() else pd.DataFrame(),
+        "transactions": transactions,
     }
