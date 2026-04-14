@@ -3,9 +3,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots      # <-- NEW
+from plotly.subplots import make_subplots
 from datetime import datetime, date
-from pathlib import Path                       # <-- NEW
+from pathlib import Path
+import pickle
 
 # ----------------------------------------------------------------------
 # Imports absolus du package « src »
@@ -17,9 +18,7 @@ from portfolio import predict_all, run_simulation, get_live_prices
 # ----------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def compute_signals(dates):
-    """
-    Calcule les prédictions (incluant le champ `signal`) pour chaque date fournie.
-    """
+    """Calcule les prédictions (incluant le champ `signal`) pour chaque date."""
     frames = []
     for d in dates:
         pred = predict_all(pd.Timestamp(d))
@@ -31,7 +30,30 @@ def compute_signals(dates):
 
     if frames:
         return pd.concat(frames, ignore_index=True)
-    return pd.DataFrame(columns=["date", "symbol", "signal", "probability", "score", "category", "price"])
+    return pd.DataFrame(
+        columns=["date", "symbol", "signal", "probability", "score", "category", "price"]
+    )
+
+# ----------------------------------------------------------------------
+# Chemin de persistance de la simulation
+# ----------------------------------------------------------------------
+SIM_PATH = Path(__file__).resolve().parents[1] / "simulation.pkl"
+
+def _save_simulation(sim):
+    """Sauvegarde la simulation au format pickle (robuste, simple)."""
+    try:
+        with open(SIM_PATH, "wb") as f:
+            pickle.dump(sim, f)
+    except Exception as exc:
+        st.error(f"Erreur lors de la sauvegarde de la simulation : {exc}")
+
+def _load_simulation():
+    """Charge la simulation depuis le disque, ou renvoie None."""
+    try:
+        with open(SIM_PATH, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
 
 # ----------------------------------------------------------------------
 # Configuration globale de la page
@@ -61,13 +83,24 @@ with st.sidebar.form(key="sim_form"):
         "Apport mensuel (≈ USDT)", min_value=0.0, value=50.0, step=5.0
     )
     submitted = st.form_submit_button("▶️ Lancer la simulation")
+    reset_sim = st.form_submit_button("🔄 Reset simulation")   # Bouton reset
 
 # ----------------------------------------------------------------------
-# Gestion du cache des résultats de simulation (évite de tout recalculer)
+# Gestion du cache des résultats de simulation
 # ----------------------------------------------------------------------
 if "simulation_result" not in st.session_state:
     st.session_state["simulation_result"] = None
 
+# Reset demandé → on purge le cache + le fichier persistant
+if reset_sim:
+    st.session_state["simulation_result"] = None
+    if "signals_df" in st.session_state:
+        del st.session_state["signals_df"]
+    if SIM_PATH.is_file():
+        SIM_PATH.unlink()
+    st.experimental_rerun()
+
+# Si l'utilisateur lance une simulation → on la calcule et on sauvegarde
 if submitted:
     with st.spinner("🔧 Simulation en cours…"):
         sim = run_simulation(
@@ -77,7 +110,11 @@ if submitted:
             monthly_deposit=monthly,
         )
         st.session_state["simulation_result"] = sim
+        _save_simulation(sim)          # <-- persistance
 else:
+    # Pas de nouvelle soumission → on tente de charger la précédente
+    if st.session_state["simulation_result"] is None:
+        st.session_state["simulation_result"] = _load_simulation()
     sim = st.session_state["simulation_result"]
 
 # ----------------------------------------------------------------------
@@ -91,7 +128,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "💡 Description de la stratégie",
         "💹 Live Prices (Binance)",
         "🔔 Signaux (temps)",
-        "📊 Comparaison prix BTC vs crypto low‑price",   # <-- NEW TAB
+        "📊 Comparaison prix BTC vs crypto low‑price",
     ]
 )
 
@@ -153,9 +190,7 @@ with tab1:
             hovermode="x unified",
         )
 
-        drawdown = (
-            hist["total_value"] / hist["total_value"].cummax() - 1
-        ) * 100
+        drawdown = (hist["total_value"] / hist["total_value"].cummax() - 1) * 100
         fig_dd = px.area(
             x=hist["date"],
             y=drawdown,
@@ -429,11 +464,11 @@ with tab7:
         index=all_symbols.index(cheap_sym) if cheap_sym else 0,
     )
 
-    # 4️⃣  Charger les deux séries temporelles – **reset index → column «date»**
+    # 4️⃣  Charger les deux séries temporelles – reset index → colonne "date"
     df_btc = pd.read_parquet(raw_dir / "BTC.parquet").reset_index()
     df_alt = pd.read_parquet(raw_dir / f"{chosen_sym}.parquet").reset_index()
 
-    # le premier champ après le reset est la date ; on le renomme explicitement
+    # renommer la colonne d’index en "date" si besoin
     if df_btc.columns[0] != "date":
         df_btc.rename(columns={df_btc.columns[0]: "date"}, inplace=True)
     if df_alt.columns[0] != "date":
@@ -444,7 +479,7 @@ with tab7:
     df_btc = df_btc[common_dates].reset_index(drop=True)
     df_alt = df_alt[df_alt["date"].isin(df_btc["date"])].reset_index(drop=True)
 
-    # 6️⃣  Dual‑axis plot (left = crypto low‑price, right = BTC)
+    # 6️⃣  Dual‑axis plot (gauche = crypto low‑price, droite = BTC)
     fig_cmp = make_subplots(specs=[[{"secondary_y": True}]])
 
     # gauche – crypto low‑price (primary axis)

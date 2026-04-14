@@ -7,20 +7,20 @@ High‑level façade utilisée par l’application Streamlit.
 """
 
 import logging
+import numpy as np                         # fallback model
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict
 
 import joblib
 import pandas as pd
-import numpy as np                     # <-- NEW (fallback model)
 
 from features import add_basic_features, select_features
 from prediction_utils import probability_to_category
 from portfolio_manager import Portfolio
 from config import cfg
 
-# Nouveau helper d’appel à Binance (prices live)
+# Helper Binance (prix live)
 from binance_price import fetch_latest_prices
 
 log = logging.getLogger(__name__)
@@ -35,10 +35,9 @@ def _load_artifacts():
     """
     Lecture unique du modèle + de la liste de features.
 
-    - Si les fichiers existent, on les charge normalement.
-    - Sinon on crée un **modèle factice** qui renvoie 0 probabilité pour
-      chaque crypto et une liste de features vide.  Ainsi l’application
-      ne plante plus (tout le tableau des signaux sera à 0 → aucun BUY).
+    - Si les fichiers existent, on les charge.
+    - Sinon on crée un **modèle factice** qui renvoie 0 probabilité pour chaque
+      crypto et une liste de features vide.  Ainsi l’application ne plante plus.
     """
     global _MODEL, _FEATURES
     if _MODEL is not None and _FEATURES is not None:
@@ -67,7 +66,6 @@ def _load_artifacts():
     class DummyModel:
         """Modèle minimal qui renvoie 0 probabilité pour chaque ligne."""
         def predict(self, X):
-            # X peut être ndarray ou DataFrame – on ne garde que le nombre de lignes
             n = X.shape[0] if hasattr(X, "shape") else len(X)
             return np.zeros(n)
 
@@ -117,7 +115,7 @@ def predict_all(date_ref: pd.Timestamp) -> pd.DataFrame:
         .infer_objects(copy=False)      # <-- important
         .values
     )
-    prob = model.predict(X)                # LightGBM (ou Dummy) renvoie déjà des probas
+    prob = model.predict(X)                # LightGBM ou DummyModel
     pred["probability"] = prob
     threshold = cfg.get("training", {}).get("threshold", 0.5)
     pred["signal"] = (prob > threshold).astype(int)
@@ -195,7 +193,6 @@ def run_simulation(
         # d) prédiction du jour (si on a des prix)
         if day_prices:
             df_pred = predict_all(pd.Timestamp(cur))
-            # ne garder que les cryptos dont le prix du jour est connu
             df_pred = df_pred[df_pred["symbol"].isin(day_prices.keys())]
             portfolio.rebalance(cur, df_pred)   # rebalance uniquement le jour 10
 
