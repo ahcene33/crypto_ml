@@ -22,6 +22,14 @@ from config import cfg
 # Nouveau helper d’appel à Binance (prices live)
 from binance_price import fetch_latest_prices
 
+def get_live_prices() -> pd.DataFrame:
+    raw_dir = Path(__file__).resolve().parents[1] / "data" / "raw"
+    symbols = [fp.stem.upper() for fp in raw_dir.glob("*.parquet")]
+    price_dict = fetch_latest_prices(symbols)
+
+    df = pd.DataFrame(list(price_dict.items()), columns=["symbol", "price"])
+    return df.sort_values("symbol").reset_index(drop=True)
+
 log = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------

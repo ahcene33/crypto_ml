@@ -31,7 +31,11 @@ __pycache__/
 # ------------------------------
 # dossiers contenant les fichiers parquet générés automatiquement
 data/raw/
-data/processed/*.parquet         
+# data/processed/*.parquet         
 
 
 !src/__init__.py
+
+# data/*                <-- commentaire ou suppression
+!data/raw/
+!data/processed/
